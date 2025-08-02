@@ -4,7 +4,7 @@ import Elm.Kernel.Debug exposing (crash)
 import Elm.Kernel.Json exposing (run, wrap, unwrap, errorToString)
 import Elm.Kernel.List exposing (Cons, Nil)
 import Elm.Kernel.Process exposing (sleep)
-import Elm.Kernel.Scheduler exposing (andThen, binding, rawSend, rawSpawn, receive, send, succeed)
+import Elm.Kernel.Scheduler exposing (andThen, binding, enqueue, rawSend, rawSpawn, receive, send, succeed)
 import Elm.Kernel.Utils exposing (Tuple0)
 import Result exposing (isOk)
 
@@ -15,16 +15,30 @@ import Result exposing (isOk)
 // PROGRAMS
 
 
-var _Platform_worker = F4(function(impl, flagDecoder, debugMetadata, args)
+var _Platform_worker = F3(function(impl, flagDecoder, debugMetadata)
 {
-	return _Platform_initialize(
-		flagDecoder,
-		args,
-		impl.__$init,
-		impl.__$update,
-		impl.__$subscriptions,
-		function() { return function() {} }
-	);
+	var init = function(args)
+	{
+		return _Platform_initialize(
+			flagDecoder,
+			args,
+			null,
+			null,
+			null,
+			function() { return function() {} },
+			impl
+		);
+	};
+
+	/**__DEBUG/
+	init.hotReloadData = {
+		__$impl: impl,
+		__$platform_effectManagers: _Platform_effectManagers,
+		__$scheduler_enqueue: __Scheduler_enqueue
+	};
+	//*/
+
+	return init;
 });
 
 
@@ -32,26 +46,83 @@ var _Platform_worker = F4(function(impl, flagDecoder, debugMetadata, args)
 // INITIALIZE A PROGRAM
 
 
-function _Platform_initialize(flagDecoder, args, init, update, subscriptions, stepperBuilder)
+function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions, stepperBuilder, impl)
 {
+	// Old versions of elm/browser do not send the `impl` – instead, they send parts of it separately.
+	// Sending the whole object is required for hot reloading.
+	if (!impl)
+	{
+		impl = {
+			__$init: _init,
+			__$update: _update,
+			__$subscriptions: _subscriptions
+		}
+	}
+
 	var result = A2(__Json_run, flagDecoder, __Json_wrap(args ? args['flags'] : undefined));
 	__Result_isOk(result) || __Debug_crash(2 /**__DEBUG/, __Json_errorToString(result.a) /**/);
 	var managers = {};
-	var initPair = init(result.a);
+	var initPair = impl.__$init(result.a);
 	var model = initPair.a;
 	var stepper = stepperBuilder(sendToApp, model);
 	var ports = _Platform_setupEffects(managers, sendToApp);
 
 	function sendToApp(msg, viewMetadata)
 	{
-		var pair = A2(update, msg, model);
+		var pair = A2(impl.__$update, msg, model);
 		stepper(model = pair.a, viewMetadata);
-		_Platform_enqueueEffects(managers, pair.b, subscriptions(model));
+		_Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
 	}
 
-	_Platform_enqueueEffects(managers, initPair.b, subscriptions(model));
+	_Platform_enqueueEffects(managers, initPair.b, impl.__$subscriptions(model));
 
-	return ports ? { ports: ports } : {};
+	var app = ports ? { ports: ports } : {};
+
+	/**__DEBUG/
+	app.hotReload = function(hotReloadData)
+	{
+		// Remove old subscriptions.
+		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
+
+		// This function depends on local state, so we need to update it to the implementation from the new code.
+		__Scheduler_enqueue = hotReloadData.__$scheduler_enqueue;
+
+		// Setup any new effect managers.
+		for (var key in hotReloadData.__$platform_effectManagers)
+		{
+			if (!(key in _Platform_effectManagers))
+			{
+				var manager = hotReloadData.__$platform_effectManagers[key];
+				_Platform_effectManagers[key] = manager;
+
+				if (manager.__portSetup)
+				{
+					if (!ports)
+					{
+						app.ports = ports = {};
+					}
+					ports[key] = manager.__portSetup(key, sendToApp);
+				}
+
+				managers[key] = _Platform_instantiateManager(manager, sendToApp);
+			}
+		}
+
+		// Replace view, update and subscriptions with implementations from the new code.
+		for (var key in hotReloadData.__$impl)
+		{
+			impl[key] = hotReloadData.__$impl[key];
+		}
+
+		// Draw synchronously with the new view function.
+		stepper(model, true);
+
+		// Set up new subscriptions.
+		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), impl.__$subscriptions(model));
+	};
+	//*/
+
+	return app;
 }
 
 
@@ -502,9 +573,45 @@ function _Platform_mergeExportsProd(obj, exports)
 
 function _Platform_export__DEBUG(exports)
 {
-	scope['Elm']
-		? _Platform_mergeExportsDebug('Elm', scope['Elm'], exports)
-		: scope['Elm'] = exports;
+	if (!('Elm' in scope))
+	{
+		// Use `defineProperty` to make `.hot` non-enumerable, so that a for-in loop on `scope['Elm']`
+		// only includes Elm modules. We use that below, and end user code might depend on it too.
+		scope['Elm'] = Object.defineProperty({}, 'hot', {
+			value: {
+				// Usage example:
+				//     const f = new Function(newCompiledElmCodeAsString);
+				//     const newScope = {};
+				//     f.call(newScope);
+				//     Elm.hot.reload(newScope);
+				reload: function(newScope)
+				{
+					// Update Elm modules.
+					_Platform_mergeExportsHotReload(scope['Elm'], newScope['Elm']);
+
+					// Update hot reload data.
+					for (var key in newScope['Elm'].hot.__hotReloadData)
+					{
+						scope['Elm'].hot.__hotReloadData[key] = newScope['Elm'].hot.__hotReloadData[key];
+					}
+
+					// Make the _new_ code push to the _old_ list of reload functions,
+					// and read hot reload data from the _old_ dict (which is always merged with the latest above).
+					var reloadFunctions = newScope['Elm'].hot.__reloadFunctions = scope['Elm'].hot.__reloadFunctions;
+					newScope['Elm'].hot.__hotReloadData = scope['Elm'].hot.__hotReloadData;
+
+					// Reload all running Elm app instances.
+					for (var i = 0; i < reloadFunctions.length; i++)
+					{
+						reloadFunctions[i]();
+					}
+				},
+				__reloadFunctions: [],
+				__hotReloadData: {}
+			}
+		});
+	}
+	_Platform_mergeExportsDebug('Elm', scope['Elm'], exports);
 }
 
 
@@ -512,10 +619,50 @@ function _Platform_mergeExportsDebug(moduleName, obj, exports)
 {
 	for (var name in exports)
 	{
-		(name in obj)
-			? (name == 'init')
-				? __Debug_crash(6, moduleName)
-				: _Platform_mergeExportsDebug(moduleName + '.' + name, obj[name], exports[name])
+		var exp = exports[name];
+		if (name == 'init')
+		{
+			if (name in obj)
+			{
+				__Debug_crash(6, moduleName)
+			}
+			else
+			{
+				obj[name] = _Platform_wrapInit(moduleName, exp);
+				scope['Elm'].hot.__hotReloadData[moduleName] = exp.hotReloadData;
+				delete exp.hotReloadData;
+			}
+		}
+		else
+		{
+			_Platform_mergeExportsDebug(moduleName + '.' + name, obj[name] || (obj[name] = {}), exp);
+		}
+	}
+}
+
+
+function _Platform_mergeExportsHotReload(obj, exports)
+{
+	for (var name in exports)
+	{
+		(name in obj && name != 'init')
+			? _Platform_mergeExportsHotReload(obj[name], exports[name])
 			: (obj[name] = exports[name]);
 	}
+}
+
+
+function _Platform_wrapInit(moduleName, init)
+{
+	return function(args)
+	{
+		var app = init(args);
+		var hotReload = app.hotReload;
+		delete app.hotReload;
+		scope['Elm'].hot.__reloadFunctions.push(function ()
+		{
+			hotReload(scope['Elm'].hot.__hotReloadData[moduleName]);
+		});
+		return app;
+	};
 }
