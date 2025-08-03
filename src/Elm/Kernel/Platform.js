@@ -64,7 +64,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	var managers = {};
 	var initPair = impl.__$init(result.a);
 	var model = initPair.a;
-	var stepper = stepperBuilder(sendToApp, model);
+	var stepper = stepperBuilder(sendToApp, model, true);
 	var ports = _Platform_setupEffects(managers, sendToApp);
 	var stopped = false;
 
@@ -79,6 +79,19 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		_Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
 	}
 
+	// Initial draw. This used to be done as a side effect of calling `stepperBuilder`.
+	// `stepper.__$shutdown` was introduced at the same time as moving the draw call here,
+	// so we can use that to know if we should draw or not. Drawing here has two benefits:
+	// Firstly, it’s easier to understand. No hidden side effects. The effects are concentrated here.
+	// Secondly, drawing can have side effects, because of custom elements. Their `connectedCallback`s
+	// fire while drawing, and can dispatch (synchronous) events which cause an update. That won’t
+	// work if the draw happened during `stepperBuilder`, since `stepper` won’t be defined here yet.
+	if (stepper.__$shutdown)
+	{
+		stepper(model, true);
+	}
+
+	// Apply `Cmd`s from `init`, and run `subscriptions` for the first time.
 	_Platform_enqueueEffects(managers, initPair.b, impl.__$subscriptions(model));
 
 	var detachedDomNode = undefined;
