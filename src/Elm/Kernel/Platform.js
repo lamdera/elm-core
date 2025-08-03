@@ -66,9 +66,14 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	var model = initPair.a;
 	var stepper = stepperBuilder(sendToApp, model);
 	var ports = _Platform_setupEffects(managers, sendToApp);
+	var stopped = false;
 
 	function sendToApp(msg, viewMetadata)
 	{
+		if (stopped)
+		{
+			return;
+		}
 		var pair = A2(impl.__$update, msg, model);
 		stepper(model = pair.a, viewMetadata);
 		_Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
@@ -76,7 +81,65 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 
 	_Platform_enqueueEffects(managers, initPair.b, impl.__$subscriptions(model));
 
-	var app = ports ? { ports: ports } : {};
+	var detachedDomNode = undefined;
+
+	var detachView = function()
+	{
+		// Make a second call to `app.detachView` do nothing.
+		if (detachedDomNode !== undefined)
+		{
+			return detachedDomNode;
+		}
+
+		// Draw synchronously one last time in case we’re waiting for an animation frame.
+		stepper(model, true);
+
+		var stepperShutdown = stepper.__$shutdown;
+
+		// Prevent new draw calls from being made.
+		stepper = function() {};
+
+		// Remove event listeners from the DOM.
+		// This is only available in newer versions of elm/browser.
+		// Also note that `_Platform_worker` does not provide it (since there’s no `view`).
+		detachedDomNode = stepperShutdown ? stepperShutdown() : null;
+
+		// Return the final DOM node produced by Elm (if any).
+		// This is necessarily not the same DOM node as the app was mounted on,
+		// since Elm might replace it, for example if the element type changes.
+		return detachedDomNode;
+	};
+
+	var stop = function()
+	{
+		// Make a second call to `app.stop` do nothing.
+		if (stopped)
+		{
+			return detachedDomNode;
+		}
+
+		// Stop view. This can trigger synchronous updates, which is why we haven’t stopped updates yet.
+		detachView();
+
+		// Stop update. (This makes us ignore messages.)
+		stopped = true;
+
+		// Stop subscriptions.
+		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
+
+		// Same return value as `app.detachView`.
+		return detachedDomNode;
+	};
+
+	var app = {
+		detachView: detachView,
+		stop: stop
+	};
+
+	if (ports)
+	{
+		app.ports = ports;
+	}
 
 	/**__DEBUG/
 	app.hotReload = function(hotReloadData)
@@ -657,12 +720,26 @@ function _Platform_wrapInit(moduleName, init)
 	return function(args)
 	{
 		var app = init(args);
+
 		var hotReload = app.hotReload;
 		delete app.hotReload;
-		scope['Elm'].hot.__reloadFunctions.push(function ()
+		var reloadFunction = function ()
 		{
 			hotReload(scope['Elm'].hot.__hotReloadData[moduleName]);
-		});
+		};
+		scope['Elm'].hot.__reloadFunctions.push(reloadFunction);
+
+		var stop = app.stop;
+		app.stop = function()
+		{
+			var index = scope['Elm'].hot.__reloadFunctions.indexOf(reloadFunction);
+			if (index !== -1)
+			{
+				scope['Elm'].hot.__reloadFunctions.splice(index, 1);
+			}
+			return stop();
+		};
+
 		return app;
 	};
 }
