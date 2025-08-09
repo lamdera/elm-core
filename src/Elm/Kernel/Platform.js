@@ -164,10 +164,28 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 					{
 						app.ports = ports = {};
 					}
-					ports[key] = manager.__portSetup(key, sendToApp);
+					var data = manager.__portSetup(key, sendToApp);
+					ports[key] = data.__port;
+					managers[key] = _Platform_instantiateManager(
+						data.__init,
+						data.__onEffects,
+						null,
+						manager.__cmdMap,
+						manager.__subMap,
+						sendToApp
+					);
 				}
-
-				managers[key] = _Platform_instantiateManager(manager, sendToApp);
+				else
+				{
+					managers[key] = _Platform_instantiateManager(
+						manager.__init,
+						manager.__onEffects,
+						manager.__onSelfMsg,
+						manager.__cmdMap,
+						manager.__subMap,
+						sendToApp
+					);
+				}
 			}
 		}
 
@@ -225,10 +243,28 @@ function _Platform_setupEffects(managers, sendToApp)
 		if (manager.__portSetup)
 		{
 			ports = ports || {};
-			ports[key] = manager.__portSetup(key, sendToApp);
+			var data = manager.__portSetup(key, sendToApp);
+			ports[key] = data.__port;
+			managers[key] = _Platform_instantiateManager(
+				data.__init,
+				data.__onEffects,
+				null,
+				manager.__cmdMap,
+				manager.__subMap,
+				sendToApp
+			);
 		}
-
-		managers[key] = _Platform_instantiateManager(manager, sendToApp);
+		else
+		{
+			managers[key] = _Platform_instantiateManager(
+				manager.__init,
+				manager.__onEffects,
+				manager.__onSelfMsg,
+				manager.__cmdMap,
+				manager.__subMap,
+				sendToApp
+			);
+		}
 	}
 
 	return ports;
@@ -247,31 +283,12 @@ function _Platform_createManager(init, onEffects, onSelfMsg, cmdMap, subMap)
 }
 
 
-function _Platform_instantiateManager(info, sendToApp)
+function _Platform_instantiateManager(init, onEffects, onSelfMsg, cmdMap, subMap, sendToApp)
 {
 	var router = {
 		__sendToApp: sendToApp,
 		__selfProcess: undefined
 	};
-
-	var init = info.__init;
-	var onEffects = info.__onEffects;
-	var onSelfMsg = info.__onSelfMsg;
-	var cmdMap = info.__cmdMap;
-	var subMap = info.__subMap;
-
-	if (info.__portSetup)
-	{
-		// Port effect managers don’t have `__init` and `__onEffects`. They have `__portSetup` instead,
-		// which temporarily assigns `__init` and `__onEffects` so they can be read above. After that,
-		// `__init` and `__onEffects` on the manager itself aren’t needed anymore, and might be overwritten
-		// by initializing another app or app instance that uses the same port.
-		// We delete them here, since they reference `sendToApp`, which has `model` etc. in scope.
-		// If we don’t delete them, the “global” `_Platform_effectManagers` is going to indirectly
-		// reference `sendToApp`, preventing a stopped app from being garbage collected.
-		delete info.__init;
-		delete info.__onEffects;
-	}
 
 	function loop(state)
 	{
@@ -517,8 +534,7 @@ function _Platform_setupOutgoingPort(name)
 
 	var init = __Process_sleep(0);
 
-	_Platform_effectManagers[name].__init = init;
-	_Platform_effectManagers[name].__onEffects = F3(function(router, cmdList, state)
+	var onEffects = F3(function(router, cmdList, state)
 	{
 		for ( ; cmdList.b; cmdList = cmdList.b) // WHILE_CONS
 		{
@@ -553,8 +569,12 @@ function _Platform_setupOutgoingPort(name)
 	}
 
 	return {
-		subscribe: subscribe,
-		unsubscribe: unsubscribe
+		__init: init,
+		__onEffects: onEffects,
+		__port: {
+			subscribe: subscribe,
+			unsubscribe: unsubscribe
+		}
 	};
 }
 
@@ -593,8 +613,7 @@ function _Platform_setupIncomingPort(name, sendToApp)
 
 	var init = __Scheduler_succeed(null);
 
-	_Platform_effectManagers[name].__init = init;
-	_Platform_effectManagers[name].__onEffects = F3(function(router, subList, state)
+	var onEffects = F3(function(router, subList, state)
 	{
 		subs = subList;
 		return init;
@@ -615,7 +634,11 @@ function _Platform_setupIncomingPort(name, sendToApp)
 		}
 	}
 
-	return { send: send };
+	return {
+		__init: init,
+		__onEffects: onEffects,
+		__port: { send: send }
+	};
 }
 
 
