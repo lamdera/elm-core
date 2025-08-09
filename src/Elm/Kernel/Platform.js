@@ -151,43 +151,12 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		__Scheduler_enqueue = hotReloadData.__$scheduler_enqueue;
 
 		// Setup any new effect managers.
-		for (var key in hotReloadData.__$platform_effectManagers)
+		var newPorts = _Platform_hotReloadEffects(managers, ports, hotReloadData.__$platform_effectManagers, sendToApp);
+		if (!ports && newPorts)
 		{
-			if (!(key in _Platform_effectManagers))
-			{
-				var manager = hotReloadData.__$platform_effectManagers[key];
-				_Platform_effectManagers[key] = manager;
-
-				if (manager.__portSetup)
-				{
-					if (!ports)
-					{
-						app.ports = ports = {};
-					}
-					var data = manager.__portSetup(key, sendToApp);
-					ports[key] = data.__port;
-					managers[key] = _Platform_instantiateManager(
-						data.__init,
-						data.__onEffects,
-						null,
-						manager.__cmdMap,
-						manager.__subMap,
-						sendToApp
-					);
-				}
-				else
-				{
-					managers[key] = _Platform_instantiateManager(
-						manager.__init,
-						manager.__onEffects,
-						manager.__onSelfMsg,
-						manager.__cmdMap,
-						manager.__subMap,
-						sendToApp
-					);
-				}
-			}
+			app.ports = newPorts;
 		}
+		ports = newPorts;
 
 		// Replace view, update and subscriptions with implementations from the new code.
 		for (var key in hotReloadData.__$impl)
@@ -256,6 +225,60 @@ function _Platform_setupEffects(managers, sendToApp)
 		}
 		else
 		{
+			managers[key] = _Platform_instantiateManager(
+				manager.__init,
+				manager.__onEffects,
+				manager.__onSelfMsg,
+				manager.__cmdMap,
+				manager.__subMap,
+				sendToApp
+			);
+		}
+	}
+
+	return ports;
+}
+
+
+function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToApp)
+{
+	for (var key in newEffectManagers)
+	{
+		var manager = newEffectManagers[key];
+		var existing = _Platform_effectManagers[key];
+
+		if (manager.__portSetup)
+		{
+			// If a port already exists and is still outgoing or still incoming:
+			if (existing && (manager.__cmdMap && existing.__cmdMap || manager.__subMap && existing.__subMap))
+			{
+				// Update its converter in case it has been changed to let different data through.
+				existing.__converter = manager.__converter;
+			}
+			else
+			{
+				// Otherwise instantiate a new port. JavaScript already subscribed to the old port
+				// won’t get any more data there (since the new Elm code never sends any).
+				// JavaScript trying to send data through the old port won’t achieve anything,
+				// since the new Elm code doesn’t have it in its subscriptions.
+				_Platform_effectManagers[key] = manager;
+				ports = ports || {};
+				var data = manager.__portSetup(key, sendToApp);
+				ports[key] = data.__port;
+				managers[key] = _Platform_instantiateManager(
+					data.__init,
+					data.__onEffects,
+					null,
+					manager.__cmdMap,
+					manager.__subMap,
+					sendToApp
+				);
+			}
+		}
+		else if (!existing)
+		{
+			// Instantiate new, non-port effect managers.
+			_Platform_effectManagers[key] = manager;
 			managers[key] = _Platform_instantiateManager(
 				manager.__init,
 				manager.__onEffects,
