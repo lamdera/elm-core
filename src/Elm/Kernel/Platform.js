@@ -254,10 +254,24 @@ function _Platform_instantiateManager(info, sendToApp)
 		__selfProcess: undefined
 	};
 
+	var init = info.__init;
 	var onEffects = info.__onEffects;
 	var onSelfMsg = info.__onSelfMsg;
 	var cmdMap = info.__cmdMap;
 	var subMap = info.__subMap;
+
+	if (info.__portSetup)
+	{
+		// Port effect managers don’t have `__init` and `__onEffects`. They have `__portSetup` instead,
+		// which temporarily assigns `__init` and `__onEffects` so they can be read above. After that,
+		// `__init` and `__onEffects` on the manager itself aren’t needed anymore, and might be overwritten
+		// by initializing another app or app instance that uses the same port.
+		// We delete them here, since they reference `sendToApp`, which has `model` etc. in scope.
+		// If we don’t delete them, the “global” `_Platform_effectManagers` is going to indirectly
+		// reference `sendToApp`, preventing a stopped app from being garbage collected.
+		delete info.__init;
+		delete info.__onEffects;
+	}
 
 	function loop(state)
 	{
@@ -276,7 +290,7 @@ function _Platform_instantiateManager(info, sendToApp)
 		}));
 	}
 
-	return router.__selfProcess = __Scheduler_rawSpawn(A2(__Scheduler_andThen, loop, info.__init));
+	return router.__selfProcess = __Scheduler_rawSpawn(A2(__Scheduler_andThen, loop, init));
 }
 
 
