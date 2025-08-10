@@ -54,10 +54,25 @@ function _Utils_eqHelp(x, y, depth, stack)
 		x = __Dict_toList(x);
 		y = __Dict_toList(y);
 	}
+	if (x.$ === 'SeqDict_elm_builtin')
+	{
+		x = $lamdera$containers$SeqDict$toList(x);
+		y = $lamdera$containers$SeqDict$toList(y);
+	}
+	if (x.$ === 'SeqSet_elm_builtin')
+	{
+		x = $lamdera$containers$SeqSet$toList(x);
+		y = $lamdera$containers$SeqSet$toList(y);
+	}
 	//*/
 
 	/**__PROD/
-	if (x.$ < 0)
+	if (x.$ < -10)
+	{
+		x = $lamdera$containers$SeqDict$toList(x);
+		y = $lamdera$containers$SeqDict$toList(y);
+	}
+	else if (x.$ < 0)
 	{
 		x = __Dict_toList(x);
 		y = __Dict_toList(y);

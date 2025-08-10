@@ -111,6 +111,20 @@ function _Debug_toAnsiString(ansi, value)
 				+ _Debug_toAnsiString(ansi, __Dict_toList(value));
 		}
 
+		if (tag === 'SeqSet_elm_builtin')
+		{
+			return _Debug_ctorColor(ansi, 'SeqSet')
+				+ _Debug_fadeColor(ansi, '.fromList') + ' '
+				+ _Debug_toAnsiString(ansi, $lamdera$containers$SeqSet$toList(value));
+		}
+
+		if (tag === 'SeqDict_elm_builtin')
+		{
+			return _Debug_ctorColor(ansi, 'SeqDict')
+				+ _Debug_fadeColor(ansi, '.fromList') + ' '
+				+ _Debug_toAnsiString(ansi, $lamdera$containers$SeqDict$toList(value));
+		}
+
 		if (tag === 'Array_elm_builtin')
 		{
 			return _Debug_ctorColor(ansi, 'Array')
