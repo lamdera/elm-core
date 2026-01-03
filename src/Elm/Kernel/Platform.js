@@ -68,7 +68,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	var ports = _Platform_setupEffects(managers, sendToApp);
 	var stopped = false;
 	var callUpdate = { call: A2 }; // Lamdera
-	var errorHandler = args && args['errorHandler'];
+	var errorHandler = args && args['errorHandler']; // Lamdera
 
 	function sendToApp(msg, viewMetadata)
 	{
@@ -76,14 +76,20 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		{
 			return;
 		}
-		try {
+		try
+		{
 			var pair = callUpdate.call(impl.__$update, msg, model);
 			stepper(model = pair.a, viewMetadata);
 			_Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
-		} catch (error) {
-			if (errorHandler) {
+		}
+		catch (error)
+		{
+			if (errorHandler)
+			{
 				errorHandler(error);
-			} else {
+			}
+			else
+			{
 				throw error;
 			}
 		}
