@@ -197,7 +197,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 
 	if (typeof _Lamdera_inject === 'function')
 	{
-		_Lamdera_inject(app, callUpdate, model, sendToApp);
+		_Lamdera_inject(app, callUpdate, function () { return model; }, sendToApp);
 	}
 
 	return app;
