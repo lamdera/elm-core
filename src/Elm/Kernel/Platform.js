@@ -19,7 +19,7 @@ var _Platform_worker = F3(function(impl, flagDecoder, debugMetadata)
 {
 	var init = function(args)
 	{
-		return _Platform_initialize(
+		return _Platform_initialize_Lamdera(
 			flagDecoder,
 			args,
 			null,
@@ -46,7 +46,7 @@ var _Platform_worker = F3(function(impl, flagDecoder, debugMetadata)
 // INITIALIZE A PROGRAM
 
 
-function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions, stepperBuilder, impl)
+function _Platform_initialize_Lamdera(flagDecoder, args, _init, _update, _subscriptions, stepperBuilder, impl)
 {
 	// Old versions of elm/browser do not send the `impl` – instead, they send parts of it separately.
 	// Sending the whole object is required for hot reloading.
