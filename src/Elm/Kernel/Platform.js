@@ -167,6 +167,13 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 
 	app.hotReload = function(hotReloadData)
 	{
+		// In case the app was stopped during `Elm.hot.reload` (by another app being reloaded).
+		// Otherwise we would set up subscriptions again below.
+		if (stopped)
+		{
+			return;
+		}
+
 		// Remove old subscriptions.
 		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
 
@@ -757,10 +764,13 @@ function _Platform_export__DEBUG(exports)
 					// reference to all hot reloaded versions of the code around (preventing garbage collection).
 					newScope['Elm'].hot.__setSchedulerEnqueue(scope['Elm'].hot.__schedulerEnqueue);
 
-					// Reload all running Elm app instances.
-					for (var i = 0; i < reloadFunctions.length; i++)
+					// Reload all running Elm app instances. Loop over a copy, since reloading an app draws,
+					// and code running during drawing (custom elements) could stop an app, which removes
+					// it from `reloadFunctions`. That would otherwise make us skip the next app.
+					var currentReloadFunctions = reloadFunctions.slice();
+					for (var i = 0; i < currentReloadFunctions.length; i++)
 					{
-						reloadFunctions[i]();
+						currentReloadFunctions[i]();
 					}
 				},
 				__reloadFunctions: [],
