@@ -56,7 +56,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 			__$init: _init,
 			__$update: _update,
 			__$subscriptions: _subscriptions
-		}
+		};
 	}
 
 	var result = A2(__Json_run, flagDecoder, __Json_wrap(args ? args['flags'] : undefined));
@@ -767,7 +767,7 @@ function _Platform_mergeExportsDebug(moduleName, obj, exports)
 		{
 			if (name in obj)
 			{
-				__Debug_crash(6, moduleName)
+				__Debug_crash(6, moduleName);
 			}
 			else if (exp.hotReloadData) // Older versions of elm/browser and elm/virtual-dom don’t provide this value.
 			{
