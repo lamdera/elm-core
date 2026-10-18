@@ -288,7 +288,7 @@ function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToAp
 				);
 			}
 		}
-		else if (!existing)
+		else if (!managers[key])
 		{
 			// Instantiate new, non-port effect managers.
 			_Platform_effectManagers[key] = manager;
