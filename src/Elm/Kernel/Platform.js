@@ -33,8 +33,7 @@ var _Platform_worker = F3(function(impl, flagDecoder, debugMetadata)
 	/**__DEBUG/
 	init.hotReloadData = {
 		__$impl: impl,
-		__$platform_effectManagers: _Platform_effectManagers,
-		__$scheduler_enqueue: __Scheduler_enqueue
+		__$platform_effectManagers: _Platform_effectManagers
 	};
 	//*/
 
@@ -170,9 +169,6 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	{
 		// Remove old subscriptions.
 		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
-
-		// This function depends on local state, so we need to update it to the implementation from the new code.
-		__Scheduler_enqueue = hotReloadData.__$scheduler_enqueue;
 
 		// Setup any new effect managers.
 		var newPorts = _Platform_hotReloadEffects(managers, effectManagers, ports, hotReloadData.__$platform_effectManagers, sendToApp);
@@ -755,6 +751,12 @@ function _Platform_export__DEBUG(exports)
 					var reloadFunctions = newScope['Elm'].hot.__reloadFunctions = scope['Elm'].hot.__reloadFunctions;
 					newScope['Elm'].hot.__hotReloadData = scope['Elm'].hot.__hotReloadData;
 
+					// Make the _new_ code use the scheduler from the _original_ code. It uses local state,
+					// and the scheduling depends on there being a single queue.
+					// Note: We use the original scheduler (rather than the latest), so that we don’t need to keep
+					// reference to all hot reloaded versions of the code around (preventing garbage collection).
+					newScope['Elm'].hot.__setSchedulerEnqueue(scope['Elm'].hot.__schedulerEnqueue);
+
 					// Reload all running Elm app instances.
 					for (var i = 0; i < reloadFunctions.length; i++)
 					{
@@ -762,10 +764,23 @@ function _Platform_export__DEBUG(exports)
 					}
 				},
 				__reloadFunctions: [],
-				__hotReloadData: {}
+				__hotReloadData: {},
+				__schedulerEnqueue: __Scheduler_enqueue,
+				__setSchedulerEnqueue: function(enqueue)
+				{
+					__Scheduler_enqueue = enqueue;
+				}
 			}
 		});
 	}
+	else
+	{
+		// Another non-optimize script on the page has already created `Elm.hot`. Use the scheduler of that script,
+		// since `Elm.hot.reload` points hot reloaded code to it (see above). Otherwise, the original code of this script
+		// would use its own scheduler, while hot reloaded code of this script would use the other script’s scheduler.
+		__Scheduler_enqueue = scope['Elm'].hot.__schedulerEnqueue;
+	}
+
 	_Platform_mergeExportsDebug('Elm', scope['Elm'], exports);
 }
 
