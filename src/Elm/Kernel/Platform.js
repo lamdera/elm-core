@@ -709,11 +709,13 @@ function _Platform_mergeExportsProd(obj, exports)
 
 function _Platform_export__DEBUG(exports)
 {
-	if (!scope['Elm'])
+	// Remember that it is possible to have both `--optimize` and non-optimize scripts on the same page.
+	// Scripts in `--optimize` define `Elm` but not `Elm.hot`.
+	if (!scope['Elm'] || !scope['Elm'].hot)
 	{
 		// Use `defineProperty` to make `.hot` non-enumerable, so that a for-in loop on `scope['Elm']`
 		// only includes Elm modules. We use that below, and end user code might depend on it too.
-		scope['Elm'] = Object.defineProperty({}, 'hot', {
+		scope['Elm'] = Object.defineProperty(scope['Elm'] || {}, 'hot', {
 			value: {
 				// Usage example:
 				//     const f = new Function(newCompiledElmCodeAsString);
