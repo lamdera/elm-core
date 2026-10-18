@@ -75,9 +75,13 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 			return;
 		}
 		var pair = A2(impl.__$update, msg, model);
-		stepper(model = pair.a, viewMetadata);
+		model = pair.a;
 		_Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
+		stepper(model, viewMetadata);
 	}
+
+	// Apply `Cmd`s from `init`, and run `subscriptions` for the first time.
+	_Platform_enqueueEffects(managers, initPair.b, impl.__$subscriptions(model));
 
 	// Initial draw. This used to be done as a side effect of calling `stepperBuilder`.
 	// `stepper.__$shutdown` was introduced at the same time as moving the draw call here,
@@ -90,9 +94,6 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	{
 		stepper(model, true);
 	}
-
-	// Apply `Cmd`s from `init`, and run `subscriptions` for the first time.
-	_Platform_enqueueEffects(managers, initPair.b, impl.__$subscriptions(model));
 
 	var detachedDomNode = undefined;
 
@@ -177,11 +178,11 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 			impl[key] = hotReloadData.__$impl[key];
 		}
 
-		// Draw synchronously with the new view function.
-		stepper(model, true);
-
 		// Set up new subscriptions.
 		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), impl.__$subscriptions(model));
+
+		// Draw synchronously with the new view function.
+		stepper(model, true);
 	};
 	//*/
 
@@ -440,6 +441,10 @@ var _Platform_effectsQueue = [];
 var _Platform_effectsActive = false;
 
 
+// Note: This is usually called together with `stepper`. We should enqueue effects _first,_
+// since `stepper` (drawing) can cause `update` to be called again (via `connectedCallback`
+// of custom elements), and it’s more expected if the first update’s commands are queued
+// before the next.
 function _Platform_enqueueEffects(managers, cmdBag, subBag)
 {
 	_Platform_effectsQueue.push({ __managers: managers, __cmdBag: cmdBag, __subBag: subBag });
