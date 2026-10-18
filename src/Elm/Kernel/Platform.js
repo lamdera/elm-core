@@ -119,7 +119,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		detachedDomNode = stepperShutdown ? stepperShutdown() : null;
 
 		// Return the final DOM node produced by Elm (if any).
-		// This is necessarily not the same DOM node as the app was mounted on,
+		// This is not necessarily the same DOM node as the app was mounted on,
 		// since Elm might replace it, for example if the element type changes.
 		return detachedDomNode;
 	};

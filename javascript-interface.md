@@ -117,7 +117,7 @@ As mentioned above for `app.stop()`, there might be pending `Cmd`s such as HTTP 
 
 What `Cmd`s might be pending that you might want to care about?
 
-- HTTP requests: You might have HTTP requests that aren’t finished yet. Note that you can use `Http.cancel` to cancel requests, and set a timeout on requests (using `Http.request`, `Http.riskyRequest` or `Http.task`) to avoid waiting forever. If the responses contains something important to show to the user, you could pass the outputs through a port.
+- HTTP requests: You might have HTTP requests that aren’t finished yet. Note that you can use `Http.cancel` to cancel requests, and set a timeout on requests (using `Http.request`, `Http.riskyRequest` or `Http.task`) to avoid waiting forever. If the responses contain something important to show to the user, you could pass the outputs through a port.
 - `Process.sleep`: You might be waiting for a certain amount of time to pass. If you do this in a loop, consider using `Time.every` instead.
 - `File.Select.file` and `File.Select.files`: The user can have the browser file picker open. This is probably not very likely.
 - `WebGL.Texture.load` and `WebGL.Texture.loadWith`: These download texture files. They don’t seem cancellable. Without a view, you probably don’t care about the texture anymore.
