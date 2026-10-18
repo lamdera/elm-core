@@ -156,6 +156,16 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	}
 
 	/**__DEBUG/
+	// The effect manager definitions this app instance currently uses.
+	// `_Platform_effectManagers` is shared by all app instances (and updated
+	// by the first one to hot reload), so we can’t use it to tell what _this_
+	// app instance needs to update.
+	var effectManagers = {};
+	for (var key in _Platform_effectManagers)
+	{
+		effectManagers[key] = _Platform_effectManagers[key];
+	}
+
 	app.hotReload = function(hotReloadData)
 	{
 		// Remove old subscriptions.
@@ -165,7 +175,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		__Scheduler_enqueue = hotReloadData.__$scheduler_enqueue;
 
 		// Setup any new effect managers.
-		var newPorts = _Platform_hotReloadEffects(managers, ports, hotReloadData.__$platform_effectManagers, sendToApp);
+		var newPorts = _Platform_hotReloadEffects(managers, effectManagers, ports, hotReloadData.__$platform_effectManagers, sendToApp);
 		if (!ports && newPorts)
 		{
 			app.ports = newPorts;
@@ -254,12 +264,12 @@ function _Platform_setupEffects(managers, sendToApp)
 }
 
 
-function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToApp)
+function _Platform_hotReloadEffects(managers, effectManagers, ports, newEffectManagers, sendToApp)
 {
 	for (var key in newEffectManagers)
 	{
 		var manager = newEffectManagers[key];
-		var existing = _Platform_effectManagers[key];
+		var existing = effectManagers[key];
 
 		if (manager.__portSetup)
 		{
@@ -275,6 +285,7 @@ function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToAp
 				// won’t get any more data there (since the new Elm code never sends any).
 				// JavaScript trying to send data through the old port won’t achieve anything,
 				// since the new Elm code doesn’t have it in its subscriptions.
+				effectManagers[key] = manager;
 				_Platform_effectManagers[key] = manager;
 				ports = ports || {};
 				var data = manager.__portSetup(key, sendToApp);
@@ -289,9 +300,10 @@ function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToAp
 				);
 			}
 		}
-		else if (!managers[key])
+		else if (!existing)
 		{
 			// Instantiate new, non-port effect managers.
+			effectManagers[key] = manager;
 			_Platform_effectManagers[key] = manager;
 			managers[key] = _Platform_instantiateManager(
 				manager.__init,
