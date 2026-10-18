@@ -709,7 +709,7 @@ function _Platform_mergeExportsProd(obj, exports)
 
 function _Platform_export__DEBUG(exports)
 {
-	if (!('Elm' in scope))
+	if (!scope['Elm'])
 	{
 		// Use `defineProperty` to make `.hot` non-enumerable, so that a for-in loop on `scope['Elm']`
 		// only includes Elm modules. We use that below, and end user code might depend on it too.
