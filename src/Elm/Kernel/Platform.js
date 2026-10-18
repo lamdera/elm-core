@@ -764,11 +764,15 @@ function _Platform_mergeExportsDebug(moduleName, obj, exports)
 			{
 				__Debug_crash(6, moduleName)
 			}
-			else
+			else if (exp.hotReloadData) // Older versions of elm/browser and elm/virtual-dom don’t provide this value.
 			{
 				obj[name] = _Platform_wrapInit(moduleName, exp);
 				scope['Elm'].hot.__hotReloadData[moduleName] = exp.hotReloadData;
 				delete exp.hotReloadData;
+			}
+			else
+			{
+				obj[name] = exp;
 			}
 		}
 		else
