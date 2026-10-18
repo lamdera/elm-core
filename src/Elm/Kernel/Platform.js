@@ -807,7 +807,7 @@ function _Platform_wrapInit(moduleName, init)
 
 		var hotReload = app.hotReload;
 		delete app.hotReload;
-		var reloadFunction = function ()
+		var reloadFunction = function()
 		{
 			hotReload(scope['Elm'].hot.__hotReloadData[moduleName]);
 		};
