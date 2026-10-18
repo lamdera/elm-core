@@ -564,7 +564,7 @@ var _Platform_outgoingPortMap = F2(function(tagger, value) { return value; });
 function _Platform_setupOutgoingPort(name)
 {
 	var subs = [];
-	var converter = _Platform_effectManagers[name].__converter;
+	var manager = _Platform_effectManagers[name];
 
 	// CREATE MANAGER
 
@@ -576,7 +576,7 @@ function _Platform_setupOutgoingPort(name)
 		{
 			// grab a separate reference to subs in case unsubscribe is called
 			var currentSubs = subs;
-			var value = __Json_unwrap(converter(cmdList.a));
+			var value = __Json_unwrap(manager.__converter(cmdList.a));
 			for (var i = 0; i < currentSubs.length; i++)
 			{
 				currentSubs[i](value);
@@ -643,7 +643,7 @@ var _Platform_incomingPortMap = F2(function(tagger, finalTagger)
 function _Platform_setupIncomingPort(name, sendToApp)
 {
 	var subs = __List_Nil;
-	var converter = _Platform_effectManagers[name].__converter;
+	var manager = _Platform_effectManagers[name];
 
 	// CREATE MANAGER
 
@@ -659,7 +659,7 @@ function _Platform_setupIncomingPort(name, sendToApp)
 
 	function send(incomingValue)
 	{
-		var result = A2(__Json_run, converter, __Json_wrap(incomingValue));
+		var result = A2(__Json_run, manager.__converter, __Json_wrap(incomingValue));
 
 		__Result_isOk(result) || __Debug_crash(4, name, result.a);
 
