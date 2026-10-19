@@ -107,6 +107,13 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		// Draw synchronously one last time in case we’re waiting for an animation frame.
 		stepper(model, true);
 
+		// Drawing can lead to side effects (via for example `disconnectedCallback`),
+		// which might have called `detachView`, so that we are already done.
+		if (detachedDomNode !== undefined)
+		{
+			return detachedDomNode;
+		}
+
 		var stepperShutdown = stepper.__$shutdown;
 
 		// Prevent new draw calls from being made.
