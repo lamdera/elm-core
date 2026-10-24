@@ -77,7 +77,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		}
 		try
 		{
-			var pair = A2(impl.__$update, msg, model);
+			var pair = callUpdate.call(impl.__$update, msg, model); // Lamdera
 			model = pair.a;
 			_Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
 			stepper(model, viewMetadata);
