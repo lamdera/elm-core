@@ -95,26 +95,38 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	}
 
 	var detachedDomNode = undefined;
+	var detaching = false;
+	var detachCallbacks = [];
 
-	var detachView = function()
+	var detachView = function(callback)
 	{
-		// Make a second call to `app.detachView` do nothing.
 		if (detachedDomNode !== undefined)
 		{
-			return detachedDomNode;
+			if (callback)
+			{
+				callback(detachedDomNode);
+			}
+			return;
 		}
 
-		// Draw synchronously one last time in case we’re waiting for an animation frame.
-		stepper(model, true);
-
-		// Drawing can lead to side effects (via for example `disconnectedCallback`),
-		// which might have called `detachView`, so that we are already done.
-		if (detachedDomNode !== undefined)
+		if (callback)
 		{
-			return detachedDomNode;
+			detachCallbacks.push(callback);
 		}
+
+		// Repeated calls, including calls from custom element lifecycle callbacks,
+		// share the same cleanup and final DOM node.
+		if (detaching)
+		{
+			return;
+		}
+		detaching = true;
 
 		var stepperShutdown = stepper.__$shutdown;
+
+		// Draw synchronously one last time in case we’re waiting for an animation frame.
+		// If a draw is already running, the animator finishes this draw request afterward.
+		stepper(model, true);
 
 		// Prevent new draw calls from being made.
 		stepper = function() {};
@@ -122,33 +134,41 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		// Remove event listeners from the DOM.
 		// This is only available in newer versions of elm/browser.
 		// Also note that `_Platform_worker` does not provide it (since there’s no `view`).
-		detachedDomNode = stepperShutdown ? stepperShutdown() : null;
-
-		// Return the final DOM node produced by Elm (if any).
-		// This is not necessarily the same DOM node as the app was mounted on,
-		// since Elm might replace it, for example if the element type changes.
-		return detachedDomNode;
+		if (stepperShutdown)
+		{
+			stepperShutdown(didDetachView);
+		}
+		else
+		{
+			didDetachView(null);
+		}
 	};
 
-	var stop = function()
+	function didDetachView(domNode)
 	{
-		// Make a second call to `app.stop` do nothing.
-		if (stopped)
+		// Read the final root only after drawing and cleanup have finished.
+		detachedDomNode = domNode;
+		var callbacks = detachCallbacks;
+		detachCallbacks = [];
+		for (var i = 0; i < callbacks.length; i++)
 		{
-			return detachedDomNode;
+			callbacks[i](domNode);
+		}
+	}
+
+	var stop = function(callback)
+	{
+		if (!stopped)
+		{
+			// Ignore messages immediately, including messages produced by the final draw
+			// or by JavaScript in the completion callback.
+			stopped = true;
+
+			// Stop subscriptions.
+			_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
 		}
 
-		// Stop view. This can trigger synchronous updates, which is why we haven’t stopped updates yet.
-		detachView();
-
-		// Stop update. (This makes us ignore messages.)
-		stopped = true;
-
-		// Stop subscriptions.
-		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
-
-		// Same return value as `app.detachView`.
-		return detachedDomNode;
+		detachView(callback);
 	};
 
 	var app = {
@@ -858,14 +878,14 @@ function _Platform_wrapInit(moduleName, init)
 		scope['Elm'].hot.__reloadFunctions.push(reloadFunction);
 
 		var stop = app.stop;
-		app.stop = function()
+		app.stop = function(callback)
 		{
 			var index = scope['Elm'].hot.__reloadFunctions.indexOf(reloadFunction);
 			if (index !== -1)
 			{
 				scope['Elm'].hot.__reloadFunctions.splice(index, 1);
 			}
-			return stop();
+			stop(callback);
 		};
 
 		return app;
