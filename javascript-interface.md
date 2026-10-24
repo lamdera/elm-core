@@ -95,7 +95,7 @@ For `myOutgoingPort : String -> Cmd msg`, use `app.ports.myOutgoingPort.subscrib
 
 For `myIncomingPort : (String -> msg) -> Sub msg`, use `app.ports.myIncomingPort.send("hello")`.
 
-If you don’t use any ports in your program, `app.ports` does not exist. (It’s _not_ an empty object!) If `app.ports` is unexpectedly missing, double check that your port actually ends up being used – all the way from where you call it, until it’s return value reaches `main`.
+If you don’t use any ports in your program, `app.ports` does not exist. (It’s _not_ an empty object!) If `app.ports` is unexpectedly missing, double check that your port actually ends up being used – all the way from where you call it, until its return value reaches `main`.
 
 ## `app.stop()`
 
@@ -103,21 +103,31 @@ This function stops your Elm app. This is useful for example when embedding your
 
 `view`, `update` and `subscriptions` are stopped immediately, but pending `Cmd`s such as HTTP requests aren’t cancelled. When they finish, the messages they produce are silently ignored. At that point, if you no longer keep a reference to `app` it will be garbage collected.
 
-The return value is the root DOM node for the app (or `null` for `Platform.worker`).
+You can pass an optional completion callback, which receives the final root DOM node for the app (or `null` for `Platform.worker`):
 
-The first thing `app.stop()` does is call `app.detachView()` (unless you already did that yourself), so read on about that function below for more details.
+```js
+app.stop(function(node) {
+    if (node) {
+        node.remove();
+    }
+});
+```
+
+The callback runs after the final draw and cleanup have finished.
+
+Stopping also detaches the view (unless you already did that yourself), so read on about that function below for more details.
 
 ## `app.detachView()`
 
 This is for advanced use cases. You probably want to use `app.stop()`.
 
-`app.detachView()` makes Elm release control over the DOM: It removes all event listeners and returns the root DOM node for the app to you. This essentially turns the app into a `Platform.worker` – `update` and `subscriptions` will still run, and ports can be used. (If the app was a `Platform.worker` from the beginning, `app.detachView()` doesn’t do anything and returns `null`.)
+`app.detachView(callback)` makes Elm release control over the DOM: It removes all event listeners and passes the final root DOM node to the completion callback (which is optional). This essentially turns the app into a `Platform.worker` – `update` and `subscriptions` will still run, and ports can be used. (If the app was a `Platform.worker` from the beginning, `app.detachView()` doesn’t do anything beyond calling the callback with `null`.)
 
 As mentioned above for `app.stop()`, there might be pending `Cmd`s such as HTTP requests when you stop your Elm app. If it’s important for you to handle the messages they produce as they finish, use `app.detachView()` rather than `app.stop()`. `app.stop()` silently ignores the messages, while with `app.detachView()` they arrive to your `update` function as usual, and you can handle them somehow. Just remember that your `view` function won’t run anymore!
 
 What `Cmd`s might be pending that you might want to care about?
 
-- HTTP requests: You might have HTTP requests that aren’t finished yet. Note that you can use `Http.cancel` to cancel requests, and set a timeout on requests (using `Http.request`, `Http.riskyRequest` or `Http.task`) to avoid waiting forever. If the responses contains something important to show to the user, you could pass the outputs through a port.
+- HTTP requests: You might have HTTP requests that aren’t finished yet. Note that you can use `Http.cancel` to cancel requests, and set a timeout on requests (using `Http.request`, `Http.riskyRequest` or `Http.task`) to avoid waiting forever. If the responses contain something important to show to the user, you could pass the outputs through a port.
 - `Process.sleep`: You might be waiting for a certain amount of time to pass. If you do this in a loop, consider using `Time.every` instead.
 - `File.Select.file` and `File.Select.files`: The user can have the browser file picker open. This is probably not very likely.
 - `WebGL.Texture.load` and `WebGL.Texture.loadWith`: These download texture files. They don’t seem cancellable. Without a view, you probably don’t care about the texture anymore.
@@ -129,25 +139,26 @@ It isn’t possible to tell when the app is “done.” You can leave it running
 If your app needs to know that it is in this view-less state, use a port to tell it:
 
 ```js
-app.detachView();
-app.ports.onDetachedView.send(true);
+app.detachView(function(node) {
+    app.ports.onDetachedView.send(true);
+});
 ```
 
 ## `app.stop()` and `app.detachView()` notes
 
-| Program               | `app.stop()`         | `app.detachView()`    | return value  |
-| --------------------- | -------------------- | --------------------- | ------------- |
-| `Html`                | same as `detachView` |                       | root DOM node |
-| `Browser.sandbox`     | same as `detachView` |                       | root DOM node |
-| `Browser.element`     |                      |                       | root DOM node |
-| `Browser.document`    |                      |                       | `<body>`      |
-| `Browser.application` |                      | also stops navigation | `<body>`      |
-| `Platform.worker`     |                      | does nothing          | `null`        |
+| Program               | `app.stop()`         | `app.detachView()`    | callback argument |
+| --------------------- | -------------------- | --------------------- | ----------------- |
+| `Html`                | same as `detachView` |                       | root DOM node     |
+| `Browser.sandbox`     | same as `detachView` |                       | root DOM node     |
+| `Browser.element`     |                      |                       | root DOM node     |
+| `Browser.document`    |                      |                       | `<body>`          |
+| `Browser.application` |                      | also stops navigation | `<body>`          |
+| `Platform.worker`     |                      | does nothing          | `null`            |
 
 - `Html` and `Browser.sandbox` have no effects, so `app.stop()` does not have anything more to do than stopping the view. (Except one thing: The app won’t be garbage collected unless you call `app.stop()`. This is due to hot reloading, and does not apply for `--optimize`.)
-- `Platform.worker` programs have no view, so `app.detachView()` doesn’t do anything, and both `app.stop()` and `app.detachView()` return `null` as there is no DOM node to return.
-- `Html`, `Browser.sandbox` and `Browser.element` programs all require a DOM node when initializing them: `Elm.MyModule.init({ node: myDomNode })`. Elm takes over `myDomNode` and uses it for rendering. Elm might even replace the DOM node with a new one, for example if you passed a `<div>` and then rendered a `<main>` element instead in your Elm view. The return value of `app.detachView()` is the root DOM node at the time, which may or may not be the same one as the `myDomNode` you passed when initializing. You can use the returned DOM node to for example remove it from the page, or pass it to a new Elm app.
-- `Browser.document` and `Browser.application` always use the `<body>` element on the page for rendering. `app.stop()` and `app.detachView()` return that `<body>` element. Unless you’ve done something very unconventional, the return value is the same as `document.body`.
+- `Platform.worker` programs have no view, so `app.detachView()` doesn’t do anything, and the callbacks to both `app.stop()` and `app.detachView()` receive `null` as there is no DOM node.
+- `Html`, `Browser.sandbox` and `Browser.element` programs all require a DOM node when initializing them: `Elm.MyModule.init({ node: myDomNode })`. Elm takes over `myDomNode` and uses it for rendering. Elm might even replace the DOM node with a new one, for example if you passed a `<div>` and then rendered a `<main>` element instead in your Elm view. The callback to `app.detachView()` receives the root DOM node after the final draw, which may or may not be the same one as the `myDomNode` you passed when initializing. Inside the callback, you can use that DOM node to for example remove it from the page, or pass it to a new Elm app.
+- `Browser.document` and `Browser.application` always use the `<body>` element on the page for rendering. The callbacks to `app.stop()` and `app.detachView()` receive that `<body>` element. Unless you’ve done something very unconventional, it is the same as `document.body`.
 - `Browser.application` programs react to the user using the back and forward buttons of the browser, by listening to the `popstate` event. This event listener is removed by `app.detachView()`.
 
 Here’s a comparison with trying to stop an Elm app using Elm code vs using `app.stop()` and `app.detachView()`:

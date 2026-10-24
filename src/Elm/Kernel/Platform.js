@@ -33,8 +33,7 @@ var _Platform_worker = F3(function(impl, flagDecoder, debugMetadata)
 	/**__DEBUG/
 	init.hotReloadData = {
 		__$impl: impl,
-		__$platform_effectManagers: _Platform_effectManagers,
-		__$scheduler_enqueue: __Scheduler_enqueue
+		__$platform_effectManagers: _Platform_effectManagers
 	};
 	//*/
 
@@ -56,7 +55,7 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 			__$init: _init,
 			__$update: _update,
 			__$subscriptions: _subscriptions
-		}
+		};
 	}
 
 	var result = A2(__Json_run, flagDecoder, __Json_wrap(args ? args['flags'] : undefined));
@@ -78,9 +77,10 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		}
 		try
 		{
-			var pair = callUpdate.call(impl.__$update, msg, model);
-			stepper(model = pair.a, viewMetadata);
+			var pair = A2(impl.__$update, msg, model);
+			model = pair.a;
 			_Platform_enqueueEffects(managers, pair.b, impl.__$subscriptions(model));
+			stepper(model, viewMetadata);
 		}
 		catch (error)
 		{
@@ -95,6 +95,9 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		}
 	}
 
+	// Apply `Cmd`s from `init`, and run `subscriptions` for the first time.
+	_Platform_enqueueEffects(managers, initPair.b, impl.__$subscriptions(model));
+
 	// Initial draw. This used to be done as a side effect of calling `stepperBuilder`.
 	// `stepper.__$shutdown` was introduced at the same time as moving the draw call here,
 	// so we can use that to know if we should draw or not. Drawing here has two benefits:
@@ -107,23 +110,39 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		stepper(model, true);
 	}
 
-	// Apply `Cmd`s from `init`, and run `subscriptions` for the first time.
-	_Platform_enqueueEffects(managers, initPair.b, impl.__$subscriptions(model));
-
 	var detachedDomNode = undefined;
+	var detaching = false;
+	var detachCallbacks = [];
 
-	var detachView = function()
+	var detachView = function(callback)
 	{
-		// Make a second call to `app.detachView` do nothing.
 		if (detachedDomNode !== undefined)
 		{
-			return detachedDomNode;
+			if (callback)
+			{
+				callback(detachedDomNode);
+			}
+			return;
 		}
 
-		// Draw synchronously one last time in case we’re waiting for an animation frame.
-		stepper(model, true);
+		if (callback)
+		{
+			detachCallbacks.push(callback);
+		}
+
+		// Repeated calls, including calls from custom element lifecycle callbacks,
+		// share the same cleanup and final DOM node.
+		if (detaching)
+		{
+			return;
+		}
+		detaching = true;
 
 		var stepperShutdown = stepper.__$shutdown;
+
+		// Draw synchronously one last time in case we’re waiting for an animation frame.
+		// If a draw is already running, the animator finishes this draw request afterward.
+		stepper(model, true);
 
 		// Prevent new draw calls from being made.
 		stepper = function() {};
@@ -131,33 +150,41 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 		// Remove event listeners from the DOM.
 		// This is only available in newer versions of elm/browser.
 		// Also note that `_Platform_worker` does not provide it (since there’s no `view`).
-		detachedDomNode = stepperShutdown ? stepperShutdown() : null;
-
-		// Return the final DOM node produced by Elm (if any).
-		// This is necessarily not the same DOM node as the app was mounted on,
-		// since Elm might replace it, for example if the element type changes.
-		return detachedDomNode;
+		if (stepperShutdown)
+		{
+			stepperShutdown(didDetachView);
+		}
+		else
+		{
+			didDetachView(null);
+		}
 	};
 
-	var stop = function()
+	function didDetachView(domNode)
 	{
-		// Make a second call to `app.stop` do nothing.
-		if (stopped)
+		// Read the final root only after drawing and cleanup have finished.
+		detachedDomNode = domNode;
+		var callbacks = detachCallbacks;
+		detachCallbacks = [];
+		for (var i = 0; i < callbacks.length; i++)
 		{
-			return detachedDomNode;
+			callbacks[i](domNode);
+		}
+	}
+
+	var stop = function(callback)
+	{
+		if (!stopped)
+		{
+			// Ignore messages immediately, including messages produced by the final draw
+			// or by JavaScript in the completion callback.
+			stopped = true;
+
+			// Stop subscriptions.
+			_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
 		}
 
-		// Stop view. This can trigger synchronous updates, which is why we haven’t stopped updates yet.
-		detachView();
-
-		// Stop update. (This makes us ignore messages.)
-		stopped = true;
-
-		// Stop subscriptions.
-		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
-
-		// Same return value as `app.detachView`.
-		return detachedDomNode;
+		detachView(callback);
 	};
 
 	var app = {
@@ -171,16 +198,30 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 	}
 
 	/**__DEBUG/
+	// The effect manager definitions this app instance currently uses.
+	// `_Platform_effectManagers` is shared by all app instances (and updated
+	// by the first one to hot reload), so we can’t use it to tell what _this_
+	// app instance needs to update.
+	var effectManagers = {};
+	for (var key in _Platform_effectManagers)
+	{
+		effectManagers[key] = _Platform_effectManagers[key];
+	}
+
 	app.hotReload = function(hotReloadData)
 	{
+		// In case the app was stopped during `Elm.hot.reload` (by another app being reloaded).
+		// Otherwise we would set up subscriptions again below.
+		if (stopped)
+		{
+			return;
+		}
+
 		// Remove old subscriptions.
 		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), _Platform_batch(_List_Nil));
 
-		// This function depends on local state, so we need to update it to the implementation from the new code.
-		__Scheduler_enqueue = hotReloadData.__$scheduler_enqueue;
-
 		// Setup any new effect managers.
-		var newPorts = _Platform_hotReloadEffects(managers, ports, hotReloadData.__$platform_effectManagers, sendToApp);
+		var newPorts = _Platform_hotReloadEffects(managers, effectManagers, ports, hotReloadData.__$platform_effectManagers, sendToApp);
 		if (!ports && newPorts)
 		{
 			app.ports = newPorts;
@@ -193,11 +234,11 @@ function _Platform_initialize(flagDecoder, args, _init, _update, _subscriptions,
 			impl[key] = hotReloadData.__$impl[key];
 		}
 
-		// Draw synchronously with the new view function.
-		stepper(model, true);
-
 		// Set up new subscriptions.
 		_Platform_enqueueEffects(managers, _Platform_batch(_List_Nil), impl.__$subscriptions(model));
+
+		// Draw synchronously with the new view function.
+		stepper(model, true);
 	};
 	//*/
 
@@ -274,12 +315,12 @@ function _Platform_setupEffects(managers, sendToApp)
 }
 
 
-function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToApp)
+function _Platform_hotReloadEffects(managers, effectManagers, ports, newEffectManagers, sendToApp)
 {
 	for (var key in newEffectManagers)
 	{
 		var manager = newEffectManagers[key];
-		var existing = _Platform_effectManagers[key];
+		var existing = effectManagers[key];
 
 		if (manager.__portSetup)
 		{
@@ -295,6 +336,7 @@ function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToAp
 				// won’t get any more data there (since the new Elm code never sends any).
 				// JavaScript trying to send data through the old port won’t achieve anything,
 				// since the new Elm code doesn’t have it in its subscriptions.
+				effectManagers[key] = manager;
 				_Platform_effectManagers[key] = manager;
 				ports = ports || {};
 				var data = manager.__portSetup(key, sendToApp);
@@ -312,6 +354,7 @@ function _Platform_hotReloadEffects(managers, ports, newEffectManagers, sendToAp
 		else if (!existing)
 		{
 			// Instantiate new, non-port effect managers.
+			effectManagers[key] = manager;
 			_Platform_effectManagers[key] = manager;
 			managers[key] = _Platform_instantiateManager(
 				manager.__init,
@@ -461,6 +504,10 @@ var _Platform_effectsQueue = [];
 var _Platform_effectsActive = false;
 
 
+// Note: This is usually called together with `stepper`. We should enqueue effects _first,_
+// since `stepper` (drawing) can cause `update` to be called again (via `connectedCallback`
+// of custom elements), and it’s more expected if the first update’s commands are queued
+// before the next.
 function _Platform_enqueueEffects(managers, cmdBag, subBag)
 {
 	_Platform_effectsQueue.push({ __managers: managers, __cmdBag: cmdBag, __subBag: subBag });
@@ -585,7 +632,7 @@ var _Platform_outgoingPortMap = F2(function(tagger, value) { return value; });
 function _Platform_setupOutgoingPort(name)
 {
 	var subs = [];
-	var converter = _Platform_effectManagers[name].__converter;
+	var manager = _Platform_effectManagers[name];
 
 	// CREATE MANAGER
 
@@ -597,7 +644,7 @@ function _Platform_setupOutgoingPort(name)
 		{
 			// grab a separate reference to subs in case unsubscribe is called
 			var currentSubs = subs;
-			var value = __Json_unwrap(converter(cmdList.a));
+			var value = __Json_unwrap(manager.__converter(cmdList.a));
 			for (var i = 0; i < currentSubs.length; i++)
 			{
 				currentSubs[i](value);
@@ -664,7 +711,7 @@ var _Platform_incomingPortMap = F2(function(tagger, finalTagger)
 function _Platform_setupIncomingPort(name, sendToApp)
 {
 	var subs = __List_Nil;
-	var converter = _Platform_effectManagers[name].__converter;
+	var manager = _Platform_effectManagers[name];
 
 	// CREATE MANAGER
 
@@ -680,7 +727,7 @@ function _Platform_setupIncomingPort(name, sendToApp)
 
 	function send(incomingValue)
 	{
-		var result = A2(__Json_run, converter, __Json_wrap(incomingValue));
+		var result = A2(__Json_run, manager.__converter, __Json_wrap(incomingValue));
 
 		__Result_isOk(result) || __Debug_crash(4, name, result.a);
 
@@ -730,11 +777,13 @@ function _Platform_mergeExportsProd(obj, exports)
 
 function _Platform_export__DEBUG(exports)
 {
-	if (!('Elm' in scope))
+	// Remember that it is possible to have both `--optimize` and non-optimize scripts on the same page.
+	// Scripts in `--optimize` define `Elm` but not `Elm.hot`.
+	if (!scope['Elm'] || !scope['Elm'].hot)
 	{
 		// Use `defineProperty` to make `.hot` non-enumerable, so that a for-in loop on `scope['Elm']`
 		// only includes Elm modules. We use that below, and end user code might depend on it too.
-		scope['Elm'] = Object.defineProperty({}, 'hot', {
+		scope['Elm'] = Object.defineProperty(scope['Elm'] || {}, 'hot', {
 			value: {
 				// Usage example:
 				//     const f = new Function(newCompiledElmCodeAsString);
@@ -757,17 +806,39 @@ function _Platform_export__DEBUG(exports)
 					var reloadFunctions = newScope['Elm'].hot.__reloadFunctions = scope['Elm'].hot.__reloadFunctions;
 					newScope['Elm'].hot.__hotReloadData = scope['Elm'].hot.__hotReloadData;
 
-					// Reload all running Elm app instances.
-					for (var i = 0; i < reloadFunctions.length; i++)
+					// Make the _new_ code use the scheduler from the _original_ code. It uses local state,
+					// and the scheduling depends on there being a single queue.
+					// Note: We use the original scheduler (rather than the latest), so that we don’t need to keep
+					// reference to all hot reloaded versions of the code around (preventing garbage collection).
+					newScope['Elm'].hot.__setSchedulerEnqueue(scope['Elm'].hot.__schedulerEnqueue);
+
+					// Reload all running Elm app instances. Loop over a copy, since reloading an app draws,
+					// and code running during drawing (custom elements) could stop an app, which removes
+					// it from `reloadFunctions`. That would otherwise make us skip the next app.
+					var currentReloadFunctions = reloadFunctions.slice();
+					for (var i = 0; i < currentReloadFunctions.length; i++)
 					{
-						reloadFunctions[i]();
+						currentReloadFunctions[i]();
 					}
 				},
 				__reloadFunctions: [],
-				__hotReloadData: {}
+				__hotReloadData: {},
+				__schedulerEnqueue: __Scheduler_enqueue,
+				__setSchedulerEnqueue: function(enqueue)
+				{
+					__Scheduler_enqueue = enqueue;
+				}
 			}
 		});
 	}
+	else
+	{
+		// Another non-optimize script on the page has already created `Elm.hot`. Use the scheduler of that script,
+		// since `Elm.hot.reload` points hot reloaded code to it (see above). Otherwise, the original code of this script
+		// would use its own scheduler, while hot reloaded code of this script would use the other script’s scheduler.
+		__Scheduler_enqueue = scope['Elm'].hot.__schedulerEnqueue;
+	}
+
 	_Platform_mergeExportsDebug('Elm', scope['Elm'], exports);
 }
 
@@ -781,13 +852,17 @@ function _Platform_mergeExportsDebug(moduleName, obj, exports)
 		{
 			if (name in obj)
 			{
-				__Debug_crash(6, moduleName)
+				__Debug_crash(6, moduleName);
 			}
-			else
+			else if (exp.hotReloadData) // Older versions of elm/browser and elm/virtual-dom don’t provide this value.
 			{
 				obj[name] = _Platform_wrapInit(moduleName, exp);
 				scope['Elm'].hot.__hotReloadData[moduleName] = exp.hotReloadData;
 				delete exp.hotReloadData;
+			}
+			else
+			{
+				obj[name] = exp;
 			}
 		}
 		else
@@ -817,21 +892,21 @@ function _Platform_wrapInit(moduleName, init)
 
 		var hotReload = app.hotReload;
 		delete app.hotReload;
-		var reloadFunction = function ()
+		var reloadFunction = function()
 		{
 			hotReload(scope['Elm'].hot.__hotReloadData[moduleName]);
 		};
 		scope['Elm'].hot.__reloadFunctions.push(reloadFunction);
 
 		var stop = app.stop;
-		app.stop = function()
+		app.stop = function(callback)
 		{
 			var index = scope['Elm'].hot.__reloadFunctions.indexOf(reloadFunction);
 			if (index !== -1)
 			{
 				scope['Elm'].hot.__reloadFunctions.splice(index, 1);
 			}
-			return stop();
+			stop(callback);
 		};
 
 		return app;
